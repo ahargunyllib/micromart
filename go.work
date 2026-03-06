@@ -1,6 +1,7 @@
 go 1.25.7
 
 use (
+	./gen
 	./pkg/config
 	./pkg/grpcutil
 	./pkg/logger

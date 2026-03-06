@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package inventory.v1;
+
+option go_package = "github.com/ahargunyllib/micromart/gen/inventory/v1;inventoryv1";
+
+import "google/protobuf/timestamp.proto";
+
+service InventoryService {
+  rpc CreateProduct(CreateProductRequest) returns (CreateProductResponse);
+  rpc GetProduct(GetProductRequest) returns (GetProductResponse);
+  rpc UpdateProduct(UpdateProductRequest) returns (UpdateProductResponse);
+  rpc ListProducts(ListProductsRequest) returns (ListProductsResponse);
+  rpc SearchProducts(SearchProductsRequest) returns (SearchProductsResponse);
+  rpc ReserveStock(ReserveStockRequest) returns (ReserveStockResponse);
+  rpc ReleaseStock(ReleaseStockRequest) returns (ReleaseStockResponse);
+  rpc DecrementStock(DecrementStockRequest) returns (DecrementStockResponse);
+}
+
+message Product {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string category = 4;
+  int64 price_cents = 5;
+  int32 stock_available = 6;
+  int32 stock_reserved = 7;
+  bool active = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+message StockItem {
+  string product_id = 1;
+  int32 quantity = 2;
+}
+
+message CreateProductRequest {
+  string name = 1;
+  string description = 2;
+  string category = 3;
+  int64 price_cents = 4;
+  int32 initial_stock = 5;
+}
+
+message CreateProductResponse {
+  Product product = 1;
+}
+
+message GetProductRequest {
+  string id = 1;
+}
+
+message GetProductResponse {
+  Product product = 1;
+}
+
+message UpdateProductRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional string category = 4;
+  optional int64 price_cents = 5;
+  optional bool active = 6;
+}
+
+message UpdateProductResponse {
+  Product product = 1;
+}
+
+message ListProductsRequest {
+  string category = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListProductsResponse {
+  repeated Product products = 1;
+  string next_page_token = 2;
+}
+
+message SearchProductsRequest {
+  string query = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message SearchProductsResponse {
+  repeated Product products = 1;
+  string next_page_token = 2;
+}
+
+message ReserveStockRequest {
+  string order_id = 1;
+  repeated StockItem items = 2;
+}
+
+message ReserveStockResponse {
+  string reservation_id = 1;
+}
+
+message ReleaseStockRequest {
+  string reservation_id = 1;
+}
+
+message ReleaseStockResponse {}
+
+message DecrementStockRequest {
+  string reservation_id = 1;
+}
+
+message DecrementStockResponse {}
