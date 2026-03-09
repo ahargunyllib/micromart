@@ -5,6 +5,7 @@ use (
 	./pkg/config
 	./pkg/grpcutil
 	./pkg/logger
+	./pkg/redis
 	./services/gateway
 	./services/inventory
 	./services/order
