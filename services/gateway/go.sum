@@ -1,0 +1,6 @@
+github.com/ahargunyllib/micromart/pkg/config v0.0.0-20260306184617-78ae1c8603f1 h1:oJAn/GZlp4EetThJtO0jzN2zXjRD4Nxcu1XBmVEK6LE=
+github.com/ahargunyllib/micromart/pkg/config v0.0.0-20260306184617-78ae1c8603f1/go.mod h1:AMmQXZQtrhw7hUhVWSRQu8fyy66KqW40whLWAgfhtgw=
+github.com/ahargunyllib/micromart/pkg/logger v0.0.0-20260306184617-78ae1c8603f1 h1:qbpCile9YMMQlParFt0B/7Rb8vhG0PlMxHx4SDxQfSU=
+github.com/ahargunyllib/micromart/pkg/logger v0.0.0-20260306184617-78ae1c8603f1/go.mod h1:QHMtZdXVEPvquxyaJhe9IRTgRSrOv1NF9XvSZVpslBM=
+github.com/go-chi/chi/v5 v5.2.5 h1:Eg4myHZBjyvJmAFjFvWgrqDTXFyOzjj7YIm3L3mu6Ug=
+github.com/go-chi/chi/v5 v5.2.5/go.mod h1:X7Gx4mteadT3eDOMTsXzmI4/rwUpOwBHLpAfupzFJP0=
