@@ -10,7 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	inventoryv1 "github.com/ahargunyllib/micromart/gen/inventory/v1"
+	orderv1 "github.com/ahargunyllib/micromart/gen/order/v1"
 	"github.com/ahargunyllib/micromart/pkg/config"
+	"github.com/ahargunyllib/micromart/pkg/grpcutil"
 	"github.com/ahargunyllib/micromart/pkg/logger"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -18,12 +21,31 @@ import (
 
 func main() {
 	log := logger.New("gateway")
-
 	port := config.Get("PORT", "8080")
 
-	// TODO: Dial gRPC connections in Phase 2
-	// orderConn, err := grpcutil.Dial(ctx, config.MustGet("ORDER_SERVICE_ADDR"))
-	// inventoryConn, err := grpcutil.Dial(ctx, config.MustGet("INVENTORY_SERVICE_ADDR"))
+	orderAddr := config.MustGet("ORDER_SERVICE_ADDR")
+	orderConn, err := grpcutil.Dial(context.Background(), orderAddr)
+	if err != nil {
+		log.Error("failed to connect to order service", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	defer orderConn.Close()
+	log.Info("connected to order service", slog.String("addr", orderAddr))
+
+	inventoryAddr := config.MustGet("INVENTORY_SERVICE_ADDR")
+	inventoryConn, err := grpcutil.Dial(context.Background(), inventoryAddr)
+	if err != nil {
+		log.Error("failed to connect to inventory service", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	defer inventoryConn.Close()
+	log.Info("connected to inventory service", slog.String("addr", inventoryAddr))
+
+	orderClient := orderv1.NewOrderServiceClient(orderConn)
+	inventoryClient := inventoryv1.NewInventoryServiceClient(inventoryConn)
+
+	productHandler := NewProductHandler(inventoryClient)
+	orderHandler := NewOrderHandler(orderClient)
 
 	r := chi.NewRouter()
 
@@ -33,24 +55,23 @@ func main() {
 	r.Use(middleware.Timeout(30 * time.Second))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Route("/products", func(r chi.Router) {
-			r.Post("/", notImplemented)
-			r.Get("/", notImplemented)
-			r.Get("/search", notImplemented)
-			r.Get("/{id}", notImplemented)
-			r.Put("/{id}", notImplemented)
+			r.Post("/", productHandler.Create)
+			r.Get("/", productHandler.List)
+			r.Get("/search", productHandler.Search)
+			r.Get("/{id}", productHandler.Get)
+			r.Put("/{id}", productHandler.Update)
 		})
 
 		r.Route("/orders", func(r chi.Router) {
-			r.Post("/", notImplemented)
-			r.Get("/", notImplemented)
-			r.Get("/{id}", notImplemented)
-			r.Post("/{id}/cancel", notImplemented)
+			r.Post("/", orderHandler.Create)
+			r.Get("/", orderHandler.List)
+			r.Get("/{id}", orderHandler.Get)
+			r.Post("/{id}/cancel", orderHandler.Cancel)
 		})
 	})
 
@@ -82,10 +103,4 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error("forced shutdown", slog.String("error", err.Error()))
 	}
-}
-
-func notImplemented(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	w.Write([]byte(`{"error":"not implemented"}`))
 }
