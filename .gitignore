@@ -1,3 +1,36 @@
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Docker volumes
+data/
+
+# Temporary
+tmp/
+*.log
+
 # nix
-.direnv
 .envrc
+.direnv/
