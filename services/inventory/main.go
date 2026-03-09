@@ -9,11 +9,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	inventoryv1 "github.com/ahargunyllib/micromart/gen/inventory/v1"
 	"github.com/ahargunyllib/micromart/pkg/config"
 	"github.com/ahargunyllib/micromart/pkg/grpcutil"
 	"github.com/ahargunyllib/micromart/pkg/logger"
-	"github.com/jmoiron/sqlx"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jmoiron/sqlx"
 )
 
 func main() {
@@ -30,11 +31,12 @@ func main() {
 	db.SetMaxIdleConns(10)
 	log.Info("connected to database")
 
+	repo := NewRepository(db)
+	server := NewServer(repo)
+
 	grpcPort := config.Get("GRPC_PORT", "50052")
 	srv := grpcutil.NewServer(log)
-
-	// TODO: Register InventoryService server in Phase 2
-	// inventoryv1.RegisterInventoryServiceServer(srv, ...)
+	inventoryv1.RegisterInventoryServiceServer(srv, server)
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", grpcPort))
 	if err != nil {
