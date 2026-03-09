@@ -28,3 +28,12 @@ migrate-down-order:
 
 migrate-down-inventory:
 	./scripts/migrate.sh inventory down
+
+run-gateway:
+	set -a && . services/gateway/.env && set +a && go run ./services/gateway
+
+run-order:
+	set -a && . services/order/.env && set +a && go run ./services/order
+
+run-inventory:
+	set -a && . services/inventory/.env && set +a && go run ./services/inventory
