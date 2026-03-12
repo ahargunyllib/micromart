@@ -365,10 +365,10 @@ func (s *inventoryServer) ReleaseStock(ctx context.Context, req *inventoryv1.Rel
 		return nil, status.Errorf(codes.NotFound, "reservation %s not found", req.ReservationId)
 	}
 
-	// Release each item
+	// Release each item - restore to available and decrement reserved
 	for _, item := range items {
 		_, err = tx.ExecContext(ctx, `
-			UPDATE products SET stock_reserved = stock_reserved - $1
+			UPDATE products SET stock_available = stock_available + $1, stock_reserved = stock_reserved - $1
 			WHERE id = $2`,
 			item.Quantity, item.ProductID,
 		)
