@@ -34,8 +34,8 @@ func TestCreateOrder(t *testing.T) {
 	if order.CustomerId != "customer-1" {
 		t.Errorf("customer_id = %q, want %q", order.CustomerId, "customer-1")
 	}
-	if order.Status != orderv1.OrderStatus_ORDER_STATUS_PENDING {
-		t.Errorf("status = %v, want PENDING", order.Status)
+	if order.Status != orderv1.OrderStatus_ORDER_STATUS_COMPLETED {
+		t.Errorf("status = %v, want COMPLETED", order.Status)
 	}
 	if order.TotalCents != 1999*3 {
 		t.Errorf("total_cents = %d, want %d", order.TotalCents, 1999*3)
@@ -150,6 +150,11 @@ func TestCreateOrder_Idempotency(t *testing.T) {
 	resp2, err := env.orderClient.CreateOrder(ctx, req)
 	if err != nil {
 		t.Fatalf("CreateOrder second: %v", err)
+	}
+
+	p := getProduct(t, env, product.Id)
+	if p.StockAvailable != 49 {
+		t.Errorf("stock_available = %d, want 49 (saga should run only once)", p.StockAvailable)
 	}
 
 	// Should return the same order
@@ -309,16 +314,23 @@ func TestCancelOrder(t *testing.T) {
 	env := setupTestEnv(t)
 	ctx := context.Background()
 
-	product := createTestProduct(t, env, "Cancel Test", 1000, 10)
+	product := createTestProduct(t, env, "Cancel Test", 1000, 5)
 
+	// Create an order that will fail due to insufficient stock (requesting more than available)
 	created, err := env.orderClient.CreateOrder(ctx, &orderv1.CreateOrderRequest{
 		CustomerId: "customer-cancel",
-		Items:      []*orderv1.CreateOrderItem{{ProductId: product.Id, Quantity: 1}},
+		Items:      []*orderv1.CreateOrderItem{{ProductId: product.Id, Quantity: 10}},
 	})
 	if err != nil {
 		t.Fatalf("CreateOrder: %v", err)
 	}
 
+	// Order should be in FAILED status due to insufficient stock
+	if created.Order.Status != orderv1.OrderStatus_ORDER_STATUS_FAILED {
+		t.Fatalf("expected FAILED status, got %v", created.Order.Status)
+	}
+
+	// Cancel the failed order
 	resp, err := env.orderClient.CancelOrder(ctx, &orderv1.CancelOrderRequest{
 		Id: created.Order.Id,
 	})

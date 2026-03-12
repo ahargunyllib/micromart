@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -10,9 +11,11 @@ import (
 
 	inventoryv1 "github.com/ahargunyllib/micromart/gen/inventory/v1"
 	orderv1 "github.com/ahargunyllib/micromart/gen/order/v1"
+	redispkg "github.com/ahargunyllib/micromart/pkg/redis"
 	"github.com/jmoiron/sqlx"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/modules/redis"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -25,6 +28,7 @@ type testEnv struct {
 	inventoryClient inventoryv1.InventoryServiceClient
 	orderDB         *sqlx.DB
 	inventoryDB     *sqlx.DB
+	redis           *redispkg.Client
 }
 
 func setupTestEnv(t *testing.T) *testEnv {
@@ -67,6 +71,17 @@ func setupTestEnv(t *testing.T) *testEnv {
 	}
 	t.Cleanup(func() { inventoryPG.Terminate(ctx) })
 
+	// Start Redis container
+	redisContainer, err := redis.Run(ctx,
+		"redis:8.0-alpine",
+		redis.WithSnapshotting(10, 1),
+		redis.WithLogLevel(redis.LogLevelVerbose),
+	)
+	if err != nil {
+		t.Fatalf("start redis: %v", err)
+	}
+	t.Cleanup(func() { redisContainer.Terminate(ctx) })
+
 	// Connect to databases
 	orderConnStr, _ := orderPG.ConnectionString(ctx, "sslmode=disable")
 	inventoryConnStr, _ := inventoryPG.ConnectionString(ctx, "sslmode=disable")
@@ -83,9 +98,39 @@ func setupTestEnv(t *testing.T) *testEnv {
 	}
 	t.Cleanup(func() { inventoryDB.Close() })
 
+	// Connect to Redis
+	redisAddr, _ := redisContainer.Endpoint(ctx, "")
+	redisClient, err := redispkg.NewClient(redisAddr)
+	if err != nil {
+		t.Fatalf("connect redis: %v", err)
+	}
+	t.Cleanup(func() { redisClient.Close() })
+
 	// Run migrations
 	runMigrations(t, orderDB, orderMigrationsDir)
 	runMigrations(t, inventoryDB, inventoryMigrationsDir)
+
+	// Add stock_reservations table for test inventory service
+	_, err = inventoryDB.Exec(`
+		CREATE TABLE IF NOT EXISTS stock_reservations (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			order_id VARCHAR(255) NOT NULL UNIQUE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+
+		CREATE TABLE IF NOT EXISTS reservation_items (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			reservation_id UUID NOT NULL REFERENCES stock_reservations(id) ON DELETE CASCADE,
+			product_id UUID NOT NULL,
+			quantity INT NOT NULL CHECK (quantity > 0),
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_reservation_items_reservation_id ON reservation_items(reservation_id);
+	`)
+	if err != nil {
+		t.Fatalf("create stock_reservations table: %v", err)
+	}
 
 	// Start a real Inventory Service gRPC server
 	inventoryRepo := newInventoryRepository(inventoryDB)
@@ -110,7 +155,12 @@ func setupTestEnv(t *testing.T) *testEnv {
 
 	// Start Order Service gRPC server
 	orderRepo := NewRepository(orderDB)
-	orderServer := NewServer(orderRepo, inventoryClient)
+
+	// Create saga orchestrator (use no-op logger for tests)
+	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	saga := NewSagaOrchestrator(orderDB, inventoryClient, log)
+
+	orderServer := NewServer(orderRepo, inventoryClient, saga, redisClient)
 
 	orderLis, _ := net.Listen("tcp", "localhost:0")
 	orderGRPC := grpc.NewServer()
@@ -134,6 +184,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 		inventoryClient: inventoryClient,
 		orderDB:         orderDB,
 		inventoryDB:     inventoryDB,
+		redis:           redisClient,
 	}
 }
 
@@ -226,6 +277,188 @@ func (s *inventoryServer) GetProduct(ctx context.Context, req *inventoryv1.GetPr
 	}, nil
 }
 
+func (s *inventoryServer) ReserveStock(ctx context.Context, req *inventoryv1.ReserveStockRequest) (*inventoryv1.ReserveStockResponse, error) {
+	// Start transaction
+	tx, err := s.repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "begin tx: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Reserve each item
+	for _, item := range req.Items {
+		// Check stock availability
+		var available int32
+		err = tx.QueryRowContext(ctx, `
+			SELECT stock_available FROM products WHERE id = $1 FOR UPDATE`,
+			item.ProductId,
+		).Scan(&available)
+		if err != nil {
+			return nil, status.Errorf(codes.NotFound, "product %s not found", item.ProductId)
+		}
+
+		if available < item.Quantity {
+			return nil, status.Errorf(codes.FailedPrecondition, "insufficient stock for product %s", item.ProductId)
+		}
+
+		// Update stock
+		_, err = tx.ExecContext(ctx, `
+			UPDATE products SET stock_available = stock_available - $1, stock_reserved = stock_reserved + $1
+			WHERE id = $2`,
+			item.Quantity, item.ProductId,
+		)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "reserve stock: %v", err)
+		}
+
+		// Insert reservation record - matches actual inventory service schema
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO stock_reservations (order_id, product_id, quantity, status)
+			VALUES ($1, $2, $3, $4)`,
+			req.OrderId, item.ProductId, item.Quantity, "RESERVED",
+		)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "create reservation: %v", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, status.Errorf(codes.Internal, "commit tx: %v", err)
+	}
+
+	// Return order_id as reservation_id (matches actual inventory service behavior)
+	return &inventoryv1.ReserveStockResponse{ReservationId: req.OrderId}, nil
+}
+
+func (s *inventoryServer) ReleaseStock(ctx context.Context, req *inventoryv1.ReleaseStockRequest) (*inventoryv1.ReleaseStockResponse, error) {
+	// Start transaction
+	tx, err := s.repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "begin tx: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Get reservations for this order (reservation_id is order_id)
+	type resItem struct {
+		ProductID string `db:"product_id"`
+		Quantity  int32  `db:"quantity"`
+	}
+	var items []resItem
+	rows, err := tx.QueryContext(ctx, `
+		SELECT product_id, quantity FROM stock_reservations
+		WHERE order_id = $1 AND status = 'RESERVED'`,
+		req.ReservationId,
+	)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "query reservations: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var item resItem
+		if err := rows.Scan(&item.ProductID, &item.Quantity); err != nil {
+			return nil, status.Errorf(codes.Internal, "scan reservation: %v", err)
+		}
+		items = append(items, item)
+	}
+	if len(items) == 0 {
+		return nil, status.Errorf(codes.NotFound, "reservation %s not found", req.ReservationId)
+	}
+
+	// Release each item
+	for _, item := range items {
+		_, err = tx.ExecContext(ctx, `
+			UPDATE products SET stock_reserved = stock_reserved - $1
+			WHERE id = $2`,
+			item.Quantity, item.ProductID,
+		)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "release stock: %v", err)
+		}
+	}
+
+	// Update reservation status to RELEASED
+	_, err = tx.ExecContext(ctx, `
+		UPDATE stock_reservations SET status = 'RELEASED'
+		WHERE order_id = $1 AND status = 'RESERVED'`,
+		req.ReservationId,
+	)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "update reservation status: %v", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, status.Errorf(codes.Internal, "commit tx: %v", err)
+	}
+
+	return &inventoryv1.ReleaseStockResponse{}, nil
+}
+
+func (s *inventoryServer) DecrementStock(ctx context.Context, req *inventoryv1.DecrementStockRequest) (*inventoryv1.DecrementStockResponse, error) {
+	// Start transaction
+	tx, err := s.repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "begin tx: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Get reservations for this order (reservation_id is order_id)
+	type resItem struct {
+		ProductID string `db:"product_id"`
+		Quantity  int32  `db:"quantity"`
+	}
+	var items []resItem
+	rows, err := tx.QueryContext(ctx, `
+		SELECT product_id, quantity FROM stock_reservations
+		WHERE order_id = $1 AND status = 'RESERVED'`,
+		req.ReservationId,
+	)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "query reservations: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var item resItem
+		if err := rows.Scan(&item.ProductID, &item.Quantity); err != nil {
+			return nil, status.Errorf(codes.Internal, "scan reservation: %v", err)
+		}
+		items = append(items, item)
+	}
+	if len(items) == 0 {
+		return nil, status.Errorf(codes.NotFound, "reservation %s not found", req.ReservationId)
+	}
+
+	// Decrement reserved stock only (available was already decremented during reservation)
+	for _, item := range items {
+		_, err = tx.ExecContext(ctx, `
+			UPDATE products
+			SET stock_reserved = stock_reserved - $1
+			WHERE id = $2`,
+			item.Quantity, item.ProductID,
+		)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "decrement stock: %v", err)
+		}
+	}
+
+	// Update reservation status to DECREMENTED
+	_, err = tx.ExecContext(ctx, `
+		UPDATE stock_reservations SET status = 'DECREMENTED'
+		WHERE order_id = $1 AND status = 'RESERVED'`,
+		req.ReservationId,
+	)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "update reservation status: %v", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, status.Errorf(codes.Internal, "commit tx: %v", err)
+	}
+
+	return &inventoryv1.DecrementStockResponse{}, nil
+}
+
 // --- Helper to create a product via inventory service ---
 
 func createTestProduct(t *testing.T, env *testEnv, name string, priceCents int64, stock int32) *inventoryv1.Product {
@@ -238,6 +471,16 @@ func createTestProduct(t *testing.T, env *testEnv, name string, priceCents int64
 	})
 	if err != nil {
 		t.Fatalf("create test product: %v", err)
+	}
+	return resp.Product
+}
+
+// -- - Helper to get product details via inventory service ---
+func getProduct(t *testing.T, env *testEnv, id string) *inventoryv1.Product {
+	t.Helper()
+	resp, err := env.inventoryClient.GetProduct(context.Background(), &inventoryv1.GetProductRequest{Id: id})
+	if err != nil {
+		t.Fatalf("get product: %v", err)
 	}
 	return resp.Product
 }
