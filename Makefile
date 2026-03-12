@@ -37,12 +37,3 @@ run-order:
 
 run-inventory:
 	set -a && . services/inventory/.env && set +a && go run ./services/inventory
-
-test-gateway:
-	TESTCONTAINERS_RYUK_DISABLED=true go test -v ./services/gateway/
-
-test-order:
-	TESTCONTAINERS_RYUK_DISABLED=true go test -v ./services/order/
-
-test-inventory:
-	TESTCONTAINERS_RYUK_DISABLED=true go test -v ./services/inventory/
