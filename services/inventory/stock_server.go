@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"time"
 
 	inventoryv1 "github.com/ahargunyllib/micromart/gen/inventory/v1"
 	"google.golang.org/grpc/codes"
@@ -31,7 +32,18 @@ func (s *Server) ReserveStock(ctx context.Context, req *inventoryv1.ReserveStock
 		}
 	}
 
+	start := time.Now()
 	reservationID, err := s.repo.ReserveStock(ctx, req.OrderId, items)
+
+	if s.metrics != nil {
+		if err != nil {
+			s.metrics.StockReservationsTotal.WithLabelValues("failed").Inc()
+		} else {
+			s.metrics.StockReservationsTotal.WithLabelValues("success").Inc()
+		}
+		s.metrics.LockWaitDuration.WithLabelValues("reserve_stock").Observe(time.Since(start).Seconds())
+	}
+
 	if errors.Is(err, ErrNotFound) {
 		return nil, status.Errorf(codes.NotFound, "%v", err)
 	}

@@ -64,7 +64,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	runMigrations(t, db, migrationsDir)
 
 	repo := NewRepository(db)
-	server := NewServer(repo)
+	server := NewServer(repo, nil)
 
 	lis, err := net.Listen("tcp", "localhost:0")
 	if err != nil {

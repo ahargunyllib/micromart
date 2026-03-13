@@ -75,13 +75,31 @@ func (s *Server) CreateOrder(ctx context.Context, req *orderv1.CreateOrderReques
 		return nil, status.Errorf(codes.Internal, "create order: %v", err)
 	}
 
-	// Execute saga (synchronous)
-	s.saga.Execute(ctx, SagaInput{OrderID: order.ID, Items: sagaItems})
+	// Calculate totals for saga input
+	var totalCents int64
+	for _, item := range orderItems {
+		totalCents += item.UnitPriceCents * int64(item.Quantity)
+	}
+
+	// Execute saga
+	s.saga.Execute(ctx, SagaInput{
+		OrderID:    order.ID,
+		CustomerID: req.CustomerId,
+		TotalCents: totalCents,
+		ItemCount:  int32(len(orderItems)),
+		Items:      sagaItems,
+		CreatedAt:  order.CreatedAt,
+	})
 
 	// Refetch order with final status
 	order, items, err = s.repo.GetOrder(ctx, order.ID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "get order after saga: %v", err)
+	}
+
+	// Record metric
+	if s.metrics != nil {
+		s.metrics.OrdersCreatedTotal.WithLabelValues(order.Status).Inc()
 	}
 
 	resp := &orderv1.CreateOrderResponse{Order: orderToProto(order, items, orderItems)}

@@ -160,7 +160,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
 	saga := NewSagaOrchestrator(orderDB, inventoryClient, log, nil, nil)
 
-	orderServer := NewServer(orderRepo, inventoryClient, saga, redisClient)
+	orderServer := NewServer(orderRepo, inventoryClient, saga, redisClient, nil)
 
 	orderLis, _ := net.Listen("tcp", "localhost:0")
 	orderGRPC := grpc.NewServer()

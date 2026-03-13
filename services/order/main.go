@@ -122,7 +122,7 @@ func main() {
 	}
 
 	// gRPC server
-	server := NewServer(repo, inventoryClient, saga, redisClient)
+	server := NewServer(repo, inventoryClient, saga, redisClient, m)
 	grpcPort := config.Get("GRPC_PORT", "50051")
 	srv := grpcutil.NewServerWithMetrics(log, m)
 	orderv1.RegisterOrderServiceServer(srv, server)

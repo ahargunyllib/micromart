@@ -22,6 +22,10 @@ type Metrics struct {
 	// Inventory-specific
 	StockReservationsTotal *prometheus.CounterVec
 	LockWaitDuration       *prometheus.HistogramVec
+
+	// HTTP (for gateway)
+	HTTPRequestDuration *prometheus.HistogramVec
+	HTTPRequestsTotal   *prometheus.CounterVec
 }
 
 // New creates a Metrics instance with all custom metrics registered.
@@ -64,6 +68,17 @@ func New(service string) *Metrics {
 			Help:    "Time spent waiting for distributed locks",
 			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5},
 		}, []string{"resource"}),
+
+		HTTPRequestDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "http_request_duration_seconds",
+			Help:    "Duration of HTTP requests",
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+		}, []string{"method", "path", "status"}),
+
+		HTTPRequestsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
+			Name: "http_requests_total",
+			Help: "Total HTTP requests",
+		}, []string{"method", "path", "status"}),
 	}
 }
 

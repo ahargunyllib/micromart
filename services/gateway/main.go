@@ -15,14 +15,32 @@ import (
 	"github.com/ahargunyllib/micromart/pkg/config"
 	"github.com/ahargunyllib/micromart/pkg/grpcutil"
 	"github.com/ahargunyllib/micromart/pkg/logger"
+	metricspkg "github.com/ahargunyllib/micromart/pkg/metrics"
+	otelpkg "github.com/ahargunyllib/micromart/pkg/otel"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
 func main() {
 	log := logger.New("gateway")
+
+	// OpenTelemetry
+	otlpEndpoint := config.Get("OTLP_ENDPOINT", "localhost:4317")
+	_, otelShutdown, err := otelpkg.Init(context.Background(), "gateway", otlpEndpoint)
+	if err != nil {
+		log.Warn("failed to init otel, tracing disabled", slog.String("error", err.Error()))
+		otelShutdown = func() {}
+	} else {
+		log.Info("opentelemetry initialized", slog.String("endpoint", otlpEndpoint))
+	}
+	defer otelShutdown()
+
+	// Prometheus metrics
+	m := metricspkg.New("order-service")
+
 	port := config.Get("PORT", "8080")
 
+	// gRPC connections
 	orderAddr := config.MustGet("ORDER_SERVICE_ADDR")
 	orderConn, err := grpcutil.Dial(context.Background(), orderAddr)
 	if err != nil {
@@ -53,10 +71,14 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(TracingMiddleware)
+	r.Use(MetricsMiddleware(m))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+
+	r.Handle("/metrics", metricspkg.Handler())
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Route("/products", func(r chi.Router) {
@@ -66,7 +88,6 @@ func main() {
 			r.Get("/{id}", productHandler.Get)
 			r.Put("/{id}", productHandler.Update)
 		})
-
 		r.Route("/orders", func(r chi.Router) {
 			r.Post("/", orderHandler.Create)
 			r.Get("/", orderHandler.List)
