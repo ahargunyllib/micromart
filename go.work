@@ -5,6 +5,8 @@ use (
 	./pkg/config
 	./pkg/grpcutil
 	./pkg/logger
+	./pkg/metrics
+	./pkg/otel
 	./pkg/redis
 	./services/gateway
 	./services/inventory
