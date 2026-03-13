@@ -7,10 +7,14 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
+  - job_name: "gateway"
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+
   - job_name: "order-service"
     static_configs:
-      - targets: ["host.docker.internal:8080"] # TODO: replace with actual order service host:port
+      - targets: ["host.docker.internal:9091"]
 
   - job_name: "inventory-service"
     static_configs:
-      - targets: ["host.docker.internal:8081"] # TODO: replace with actual inventory service host:port
+      - targets: ["host.docker.internal:9092"]
