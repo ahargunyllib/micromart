@@ -158,7 +158,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 
 	// Create saga orchestrator (use no-op logger for tests)
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	saga := NewSagaOrchestrator(orderDB, inventoryClient, log)
+	saga := NewSagaOrchestrator(orderDB, inventoryClient, log, nil, nil)
 
 	orderServer := NewServer(orderRepo, inventoryClient, saga, redisClient)
 

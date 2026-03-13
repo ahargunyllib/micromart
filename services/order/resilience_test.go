@@ -55,7 +55,7 @@ func TestRetryMechanism_NonTransientErrors(t *testing.T) {
 	}
 
 	orderRepo := NewRepository(env.orderDB)
-	saga := NewSagaOrchestrator(env.orderDB, mockClient, testLogger())
+	saga := NewSagaOrchestrator(env.orderDB, mockClient, testLogger(), nil, nil)
 
 	order, _, err := orderRepo.CreateOrder(ctx, CreateOrderParams{
 		CustomerID: "no-retry-customer",
@@ -214,7 +214,7 @@ func TestSagaRecovery_WithIntermittentFailures(t *testing.T) {
 	}
 
 	orderRepo := NewRepository(env.orderDB)
-	saga := NewSagaOrchestrator(env.orderDB, mockClient, testLogger())
+	saga := NewSagaOrchestrator(env.orderDB, mockClient, testLogger(), nil, nil)
 
 	// Create multiple orders - some may hit transient failures but should recover
 	successCount := 0

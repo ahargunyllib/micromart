@@ -120,7 +120,7 @@ func TestSagaFailure_PaymentProcessing(t *testing.T) {
 	// Create order repository and saga with custom payment failure
 	orderRepo := NewRepository(env.orderDB)
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	saga := NewSagaOrchestrator(env.orderDB, env.inventoryClient, log)
+	saga := NewSagaOrchestrator(env.orderDB, env.inventoryClient, log, nil, nil)
 
 	// Override payment processor to fail
 	saga.processPayment = func(ctx context.Context, orderID string) error {
@@ -207,7 +207,7 @@ func TestSagaFailure_ConfirmOrder(t *testing.T) {
 	// Create order repository and saga with mock client
 	orderRepo := NewRepository(env.orderDB)
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	saga := NewSagaOrchestrator(env.orderDB, mockInventoryClient, log)
+	saga := NewSagaOrchestrator(env.orderDB, mockInventoryClient, log, nil, nil)
 
 	// Create order directly in DB
 	order, _, err := orderRepo.CreateOrder(ctx, CreateOrderParams{
@@ -281,7 +281,7 @@ func TestSagaIdempotency_AlreadyCompleted(t *testing.T) {
 
 	// Create saga orchestrator to execute saga again
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	saga := NewSagaOrchestrator(env.orderDB, env.inventoryClient, log)
+	saga := NewSagaOrchestrator(env.orderDB, env.inventoryClient, log, nil, nil)
 
 	// Try to execute saga again with same order ID
 	err = saga.Execute(ctx, SagaInput{
@@ -364,7 +364,7 @@ func TestSagaResume_InterruptedSagas(t *testing.T) {
 
 	// Create saga orchestrator and call Resume()
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	saga := NewSagaOrchestrator(env.orderDB, env.inventoryClient, log)
+	saga := NewSagaOrchestrator(env.orderDB, env.inventoryClient, log, nil, nil)
 
 	err = saga.Resume(ctx)
 	if err != nil {

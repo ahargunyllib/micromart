@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,13 +16,40 @@ import (
 	"github.com/ahargunyllib/micromart/pkg/config"
 	"github.com/ahargunyllib/micromart/pkg/grpcutil"
 	"github.com/ahargunyllib/micromart/pkg/logger"
+	metricspkg "github.com/ahargunyllib/micromart/pkg/metrics"
+	otelpkg "github.com/ahargunyllib/micromart/pkg/otel"
 	redispkg "github.com/ahargunyllib/micromart/pkg/redis"
-	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
 	log := logger.New("order-service")
+
+	// OpenTelemetry
+	otlpEndpoint := config.Get("OTLP_ENDPOINT", "localhost:4317")
+	_, otelShutdown, err := otelpkg.Init(context.Background(), "order-service", otlpEndpoint)
+	if err != nil {
+		log.Warn("failed to init otel, tracing disabled", slog.String("error", err.Error()))
+		otelShutdown = func() {}
+	} else {
+		log.Info("opentelemetry initialized", slog.String("endpoint", otlpEndpoint))
+	}
+	defer otelShutdown()
+
+	// Prometheus metrics
+	m := metricspkg.New("order-service")
+
+	// Start metrics HTTP server
+	metricsPort := config.Get("METRICS_PORT", "9091")
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", metricspkg.Handler())
+		log.Info("metrics server starting", slog.String("port", metricsPort))
+		if err := http.ListenAndServe(fmt.Sprintf(":%s", metricsPort), mux); err != nil {
+			log.Error("metrics server error", slog.String("error", err.Error()))
+		}
+	}()
 
 	// Database
 	db, err := sqlx.Connect("pgx", config.MustGet("DATABASE_URL"))
@@ -43,10 +71,32 @@ func main() {
 	defer redisClient.Close()
 	log.Info("connected to redis")
 
-	// Inventory Service client with circuit breaker and retry
+	// ClickHouse (optional — don't fail if unavailable)
+	var chClient *ClickHouseClient
+	chAddr := config.Get("CLICKHOUSE_ADDR", "")
+	if chAddr != "" {
+		chClient, err = NewClickHouseClient(
+			chAddr,
+			config.Get("CLICKHOUSE_DATABASE", "default"),
+			config.Get("CLICKHOUSE_USER", "micromart"),
+			config.Get("CLICKHOUSE_PASSWORD", "micromart"),
+			log,
+		)
+		if err != nil {
+			log.Warn("clickhouse unavailable, analytics disabled", slog.String("error", err.Error()))
+		} else {
+			if err := chClient.CreateTables(context.Background()); err != nil {
+				log.Warn("clickhouse table creation failed", slog.String("error", err.Error()))
+			}
+			chClient.StartConsumer(100, 5*time.Second)
+			defer chClient.Close()
+			log.Info("clickhouse connected", slog.String("addr", chAddr))
+		}
+	}
+
+	// Inventory Service client with resilience
 	inventoryAddr := config.MustGet("INVENTORY_SERVICE_ADDR")
 	cb := grpcutil.NewCircuitBreaker("inventory-service", log)
-
 	inventoryConn, err := grpcutil.DialWithResilience(context.Background(), inventoryAddr, grpcutil.DialOptions{
 		CircuitBreaker: cb,
 		MaxRetries:     3,
@@ -62,9 +112,9 @@ func main() {
 
 	inventoryClient := inventoryv1.NewInventoryServiceClient(inventoryConn)
 
-	// Saga orchestrator
+	// Saga + Server
 	repo := NewRepository(db)
-	saga := NewSagaOrchestrator(db, inventoryClient, log)
+	saga := NewSagaOrchestrator(db, inventoryClient, log, m, chClient)
 
 	// Resume any interrupted sagas from previous crash
 	if err := saga.Resume(context.Background()); err != nil {
@@ -74,7 +124,7 @@ func main() {
 	// gRPC server
 	server := NewServer(repo, inventoryClient, saga, redisClient)
 	grpcPort := config.Get("GRPC_PORT", "50051")
-	srv := grpcutil.NewServer(log)
+	srv := grpcutil.NewServerWithMetrics(log, m)
 	orderv1.RegisterOrderServiceServer(srv, server)
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", grpcPort))

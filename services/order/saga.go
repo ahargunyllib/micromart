@@ -6,9 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	inventoryv1 "github.com/ahargunyllib/micromart/gen/inventory/v1"
+	metricspkg "github.com/ahargunyllib/micromart/pkg/metrics"
 	"github.com/jmoiron/sqlx"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type SagaStep string
@@ -27,9 +33,17 @@ type SagaOrchestrator struct {
 	inventoryClient inventoryv1.InventoryServiceClient
 	log             *slog.Logger
 	processPayment  PaymentFunc
+	metrics         *metricspkg.Metrics
+	clickhouse      *ClickHouseClient
 }
 
-func NewSagaOrchestrator(db *sqlx.DB, inventoryClient inventoryv1.InventoryServiceClient, log *slog.Logger) *SagaOrchestrator {
+func NewSagaOrchestrator(
+	db *sqlx.DB,
+	inventoryClient inventoryv1.InventoryServiceClient,
+	log *slog.Logger,
+	m *metricspkg.Metrics,
+	ch *ClickHouseClient,
+) *SagaOrchestrator {
 	return &SagaOrchestrator{
 		db:              db,
 		inventoryClient: inventoryClient,
@@ -37,12 +51,18 @@ func NewSagaOrchestrator(db *sqlx.DB, inventoryClient inventoryv1.InventoryServi
 		processPayment: func(ctx context.Context, orderID string) error {
 			return nil // stub: always succeeds
 		},
+		metrics:    m,
+		clickhouse: ch,
 	}
 }
 
 type SagaInput struct {
-	OrderID string
-	Items   []SagaItem
+	OrderID    string
+	CustomerID string
+	TotalCents int64
+	ItemCount  int32
+	Items      []SagaItem
+	CreatedAt  time.Time
 }
 
 type SagaItem struct {
@@ -51,6 +71,18 @@ type SagaItem struct {
 }
 
 func (s *SagaOrchestrator) Execute(ctx context.Context, input SagaInput) error {
+	start := time.Now()
+
+	// Start a trace span for the entire saga
+	tracer := otel.Tracer("order-service")
+	ctx, span := tracer.Start(ctx, "saga.Execute",
+		trace.WithAttributes(
+			attribute.String("order.id", input.OrderID),
+			attribute.Int("order.item_count", int(input.ItemCount)),
+		),
+	)
+	defer span.End()
+
 	// Check for existing saga (idempotency)
 	existingSaga, err := s.getExistingSaga(ctx, input.OrderID)
 	if err == nil {
@@ -69,12 +101,14 @@ func (s *SagaOrchestrator) Execute(ctx context.Context, input SagaInput) error {
 	}
 	// If error is not "no rows", return the error
 	if !errors.Is(err, sql.ErrNoRows) {
+		s.recordResult("error", time.Since(start))
 		return fmt.Errorf("check existing saga: %w", err)
 	}
 	// No existing saga found, proceed with creation
 
 	sagaID, err := s.createSagaState(ctx, input.OrderID)
 	if err != nil {
+		s.recordResult("error", time.Since(start))
 		return fmt.Errorf("create saga state: %w", err)
 	}
 
@@ -86,10 +120,12 @@ func (s *SagaOrchestrator) Execute(ctx context.Context, input SagaInput) error {
 
 	reservationID, err := s.reserveInventory(ctx, input)
 	if err != nil {
+		span.SetStatus(otelcodes.Error, "reserve failed")
+		s.recordResult("failed", time.Since(start))
 		return s.fail(ctx, sagaID, input.OrderID, "", "reserve inventory failed", err)
 	}
 	s.setReservationID(ctx, sagaID, reservationID)
-	s.log.Info("inventory reserved", slog.String("order_id", input.OrderID), slog.String("reservation_id", reservationID))
+	span.AddEvent("inventory_reserved", trace.WithAttributes(attribute.String("reservation.id", reservationID)))
 
 	// Step 2: Process Payment
 	s.updateStep(ctx, sagaID, StepProcessPayment)
@@ -97,9 +133,11 @@ func (s *SagaOrchestrator) Execute(ctx context.Context, input SagaInput) error {
 
 	if err := s.processPayment(ctx, input.OrderID); err != nil {
 		s.compensateReserve(ctx, reservationID, input.OrderID)
+		span.SetStatus(otelcodes.Error, "payment failed")
+		s.recordResult("failed", time.Since(start))
 		return s.fail(ctx, sagaID, input.OrderID, reservationID, "payment failed", err)
 	}
-	s.log.Info("payment processed", slog.String("order_id", input.OrderID))
+	span.AddEvent("payment_processed", trace.WithAttributes(attribute.String("order.id", input.OrderID)))
 
 	// Step 3: Confirm (decrement inventory)
 	s.updateStep(ctx, sagaID, StepConfirmOrder)
@@ -107,12 +145,31 @@ func (s *SagaOrchestrator) Execute(ctx context.Context, input SagaInput) error {
 
 	if err := s.confirmOrder(ctx, reservationID); err != nil {
 		s.compensateReserve(ctx, reservationID, input.OrderID)
+		span.SetStatus(otelcodes.Error, "confirm failed")
+		s.recordResult("failed", time.Since(start))
 		return s.fail(ctx, sagaID, input.OrderID, reservationID, "confirm failed", err)
 	}
 
 	// Success
 	s.updateOrderStatus(ctx, input.OrderID, OrderStatusCompleted)
 	s.completeSaga(ctx, sagaID)
+
+	span.SetStatus(otelcodes.Ok, "")
+	s.recordResult("completed", time.Since(start))
+
+	// Publish analytics event
+	if s.clickhouse != nil {
+		s.clickhouse.Publish(OrderEvent{
+			OrderID:     input.OrderID,
+			CustomerID:  input.CustomerID,
+			Status:      OrderStatusCompleted,
+			TotalCents:  input.TotalCents,
+			ItemCount:   input.ItemCount,
+			CreatedAt:   input.CreatedAt,
+			CompletedAt: time.Now(),
+		})
+	}
+
 	s.log.Info("saga completed", slog.String("order_id", input.OrderID), slog.String("saga_id", sagaID))
 
 	return nil
@@ -135,9 +192,20 @@ func (s *SagaOrchestrator) Resume(ctx context.Context) error {
 	return nil
 }
 
+func (s *SagaOrchestrator) recordResult(result string, duration time.Duration) {
+	if s.metrics == nil {
+		return
+	}
+	s.metrics.SagaDuration.WithLabelValues(result).Observe(duration.Seconds())
+	s.metrics.SagaResultTotal.WithLabelValues(result).Inc()
+}
+
 // --- Saga Steps ---
 
 func (s *SagaOrchestrator) reserveInventory(ctx context.Context, input SagaInput) (string, error) {
+	_, span := otel.Tracer("order-service").Start(ctx, "saga.ReserveInventory")
+	defer span.End()
+
 	items := make([]*inventoryv1.StockItem, len(input.Items))
 	for i, item := range input.Items {
 		items[i] = &inventoryv1.StockItem{ProductId: item.ProductID, Quantity: item.Quantity}
@@ -146,15 +214,23 @@ func (s *SagaOrchestrator) reserveInventory(ctx context.Context, input SagaInput
 		OrderId: input.OrderID, Items: items,
 	})
 	if err != nil {
+		span.SetStatus(otelcodes.Error, err.Error())
 		return "", err
 	}
+	span.SetAttributes(attribute.String("reservation.id", resp.ReservationId))
 	return resp.ReservationId, nil
 }
 
 func (s *SagaOrchestrator) confirmOrder(ctx context.Context, reservationID string) error {
+	_, span := otel.Tracer("order-service").Start(ctx, "saga.ConfirmOrder")
+	defer span.End()
+
 	_, err := s.inventoryClient.DecrementStock(ctx, &inventoryv1.DecrementStockRequest{
 		ReservationId: reservationID,
 	})
+	if err != nil {
+		span.SetStatus(otelcodes.Error, err.Error())
+	}
 	return err
 }
 
@@ -164,10 +240,15 @@ func (s *SagaOrchestrator) compensateReserve(ctx context.Context, reservationID,
 	if reservationID == "" {
 		return
 	}
+
+	_, span := otel.Tracer("order-service").Start(ctx, "saga.CompensateReserve")
+	defer span.End()
+
 	_, err := s.inventoryClient.ReleaseStock(ctx, &inventoryv1.ReleaseStockRequest{
 		ReservationId: reservationID,
 	})
 	if err != nil {
+		span.SetStatus(otelcodes.Error, err.Error())
 		s.log.Error("compensation failed: release stock", slog.String("order_id", orderID), slog.String("error", err.Error()))
 	} else {
 		s.log.Info("compensation: inventory released", slog.String("order_id", orderID), slog.String("reservation_id", reservationID))
