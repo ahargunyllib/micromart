@@ -1,0 +1,6 @@
+.git
+*.md
+docs/
+tests/
+deploy/
+.github/

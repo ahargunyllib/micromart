@@ -2,10 +2,7 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-COPY go.work go.work.sum ./
-COPY pkg/ pkg/
-COPY gen/ gen/
-COPY services/order/ services/order/
+COPY . .
 
 WORKDIR /app/services/order
 RUN go mod download
