@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: micromart-config
+  namespace: micromart
+data:
+  REDIS_ADDR: "redis:6379"
+  OTLP_ENDPOINT: "otel-collector:4317"
+  CLICKHOUSE_ADDR: "clickhouse:9000"
+  CLICKHOUSE_DATABASE: "default"
+  ORDER_SERVICE_ADDR: "order-service:50051"
+  INVENTORY_SERVICE_ADDR: "inventory-service:50052"
