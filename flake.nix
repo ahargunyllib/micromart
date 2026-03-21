@@ -14,6 +14,8 @@
       packages = [
         pkgs.go
         pkgs.buf
+        pkgs.golangci-lint
+        pkgs.k6
       ];
 
       shellHook = ''
