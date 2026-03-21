@@ -131,7 +131,7 @@ sequenceDiagram
 
 | Component | Technology |
 |-----------|-----------|
-| Language | Go 1.24 |
+| Language | Go 1.25 |
 | HTTP Router | chi |
 | Inter-service | gRPC / Protocol Buffers |
 | SQL | sqlx + pgx |
@@ -165,7 +165,7 @@ sequenceDiagram
 
 ### Prerequisites
 
-- Go 1.24+
+- Go 1.25+
 - Docker & Docker Compose
 - [buf](https://buf.build/docs/installation)
 - [golang-migrate](https://github.com/golang-migrate/migrate) (or use Docker: `migrate/migrate`)
