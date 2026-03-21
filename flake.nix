@@ -14,12 +14,13 @@
       packages = [
         pkgs.go
         pkgs.buf
-        pkgs.golangci-lint
         pkgs.k6
       ];
 
       shellHook = ''
-        echo "Welcome to the devShell!"
+        export GOPATH="$HOME/go"
+        export GOBIN="$GOPATH/bin"
+        export PATH="$GOBIN:$PATH"
       '';
     };
   };
