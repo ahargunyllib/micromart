@@ -35,3 +35,7 @@ tmp/
 # nix
 .envrc
 .direnv/
+
+# Coverage reports
+coverage.out
+coverage.html
