@@ -1,4 +1,4 @@
-.PHONY: up down logs proto proto-lint lint test build run-gateway run-order run-inventory migrate-up migrate-down load-test
+.PHONY: up down logs proto proto-lint lint test build build-gateway build-order build-inventory build-migrations build-migrations-order build-migrations-inventory run-gateway run-order run-inventory migrate-up migrate-down load-test k8s-apply k8s-delete k8s-migrate-up k8s-migrate-status k8s-migrate-logs-order k8s-migrate-logs-inventory k8s-migrate-clean k8s-port-forward-grafana k8s-port-forward-prometheus k8s-port-forward-jaeger k8s-port-forward-gateway k8s-port-forward-postgres-order k8s-port-forward-postgres-inventory k8s-port-forward-redis k8s-port-forward-clickhouse k8s-status k8s-logs-gateway k8s-logs-order k8s-logs-inventory
 
 # --- Docker ---
 up:
@@ -83,7 +83,15 @@ build-order:
 build-inventory:
 	docker build -f services/inventory/Dockerfile -t micromart/inventory:latest .
 
-build: build-gateway build-order build-inventory
+build-migrations-order:
+	docker build -t micromart/migrations-order:latest migrations/order
+
+build-migrations-inventory:
+	docker build -t micromart/migrations-inventory:latest migrations/inventory
+
+build-migrations: build-migrations-order build-migrations-inventory
+
+build: build-gateway build-order build-inventory build-migrations
 
 # --- Load Testing ---
 load-test:
@@ -98,3 +106,62 @@ k8s-apply:
 
 k8s-delete:
 	kubectl delete -f deploy/k8s/
+
+# Migrations
+k8s-migrate-up:
+	kubectl apply -f deploy/k8s/migrations-order.yaml
+	kubectl apply -f deploy/k8s/migrations-inventory.yaml
+
+k8s-migrate-status:
+	@echo "Order migration status:"
+	@kubectl get job migrations-order -n micromart -o jsonpath='{.status}' 2>/dev/null || echo "Job not found"
+	@echo "\n\nInventory migration status:"
+	@kubectl get job migrations-inventory -n micromart -o jsonpath='{.status}' 2>/dev/null || echo "Job not found"
+
+k8s-migrate-logs-order:
+	kubectl logs -n micromart -l app=migrations-order --tail=100 -f
+
+k8s-migrate-logs-inventory:
+	kubectl logs -n micromart -l app=migrations-inventory --tail=100 -f
+
+k8s-migrate-clean:
+	kubectl delete job migrations-order migrations-inventory -n micromart --ignore-not-found=true
+
+# Port forwarding for local access to K8s services
+k8s-port-forward-grafana:
+	kubectl port-forward -n micromart svc/grafana 3000:3000
+
+k8s-port-forward-prometheus:
+	kubectl port-forward -n micromart svc/prometheus 9090:9090
+
+k8s-port-forward-jaeger:
+	kubectl port-forward -n micromart svc/jaeger 16686:16686
+
+k8s-port-forward-gateway:
+	kubectl port-forward -n micromart svc/gateway 8080:8080
+
+k8s-port-forward-postgres-order:
+	kubectl port-forward -n micromart svc/postgres-order 5432:5432
+
+k8s-port-forward-postgres-inventory:
+	kubectl port-forward -n micromart svc/postgres-inventory 5433:5432
+
+k8s-port-forward-redis:
+	kubectl port-forward -n micromart svc/redis 6379:6379
+
+k8s-port-forward-clickhouse:
+	kubectl port-forward -n micromart svc/clickhouse 8123:8123 9000:9000
+
+# Get status of all K8s resources
+k8s-status:
+	kubectl get all -n micromart
+
+# Get logs from services
+k8s-logs-gateway:
+	kubectl logs -n micromart -l app=gateway -f
+
+k8s-logs-order:
+	kubectl logs -n micromart -l app=order-service -f
+
+k8s-logs-inventory:
+	kubectl logs -n micromart -l app=inventory-service -f

@@ -1,0 +1,172 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-order
+  namespace: micromart
+spec:
+  selector:
+    app: postgres-order
+  ports:
+    - port: 5432
+      targetPort: postgres
+      name: postgres
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-order
+  namespace: micromart
+  labels:
+    app: postgres-order
+spec:
+  serviceName: postgres-order
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-order
+  template:
+    metadata:
+      labels:
+        app: postgres-order
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:18.2-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              value: "micromart"
+            - name: POSTGRES_PASSWORD
+              value: "micromart"
+            - name: POSTGRES_DB
+              value: "order_db"
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U micromart -d order_db
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U micromart -d order_db
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-inventory
+  namespace: micromart
+spec:
+  selector:
+    app: postgres-inventory
+  ports:
+    - port: 5432
+      targetPort: postgres
+      name: postgres
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-inventory
+  namespace: micromart
+  labels:
+    app: postgres-inventory
+spec:
+  serviceName: postgres-inventory
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-inventory
+  template:
+    metadata:
+      labels:
+        app: postgres-inventory
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:18.2-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              value: "micromart"
+            - name: POSTGRES_PASSWORD
+              value: "micromart"
+            - name: POSTGRES_DB
+              value: "inventory_db"
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U micromart -d inventory_db
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U micromart -d inventory_db
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

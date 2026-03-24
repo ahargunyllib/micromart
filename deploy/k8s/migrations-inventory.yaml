@@ -1,0 +1,47 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrations-inventory
+  namespace: micromart
+  labels:
+    app: migrations-inventory
+spec:
+  ttlSecondsAfterFinished: 86400  # Clean up after 24 hours
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: migrations-inventory
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        # Wait for postgres to be ready
+        - name: wait-for-postgres
+          image: postgres:18.2-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres-inventory.micromart.svc.cluster.local -p 5432 -U micromart; do
+                echo "Waiting for postgres-inventory to be ready..."
+                sleep 2
+              done
+              echo "PostgreSQL is ready!"
+      containers:
+        - name: migrate
+          image: ghcr.io/ahargunyllib/micromart/migrations-inventory:latest
+          imagePullPolicy: Always
+          args:
+            - -path
+            - /migrations
+            - -database
+            - postgres://micromart:micromart@postgres-inventory.micromart.svc.cluster.local:5432/inventory_db?sslmode=disable
+            - up
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
