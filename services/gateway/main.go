@@ -45,18 +45,18 @@ func main() {
 	orderConn, err := grpcutil.Dial(context.Background(), orderAddr)
 	if err != nil {
 		log.Error("failed to connect to order service", slog.String("error", err.Error()))
-		os.Exit(1)
+		return
 	}
-	defer orderConn.Close()
+	defer func() { _ = orderConn.Close() }()
 	log.Info("connected to order service", slog.String("addr", orderAddr))
 
 	inventoryAddr := config.MustGet("INVENTORY_SERVICE_ADDR")
 	inventoryConn, err := grpcutil.Dial(context.Background(), inventoryAddr)
 	if err != nil {
 		log.Error("failed to connect to inventory service", slog.String("error", err.Error()))
-		os.Exit(1)
+		return
 	}
-	defer inventoryConn.Close()
+	defer func() { _ = inventoryConn.Close() }()
 	log.Info("connected to inventory service", slog.String("addr", inventoryAddr))
 
 	orderClient := orderv1.NewOrderServiceClient(orderConn)

@@ -25,7 +25,7 @@ func (r *Repository) CreateOrder(ctx context.Context, p CreateOrderParams) (*Ord
 	if err != nil {
 		return nil, nil, fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if p.IdempotencyKey != "" {
 		var existing Order

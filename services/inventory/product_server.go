@@ -96,8 +96,8 @@ func (s *Server) ListProducts(ctx context.Context, req *inventoryv1.ListProducts
 	}
 
 	protoProducts := make([]*inventoryv1.Product, len(products))
-	for i, p := range products {
-		protoProducts[i] = productToProto(&p)
+	for i := range products {
+		protoProducts[i] = productToProto(&products[i])
 	}
 
 	return &inventoryv1.ListProductsResponse{
@@ -117,8 +117,8 @@ func (s *Server) SearchProducts(ctx context.Context, req *inventoryv1.SearchProd
 	}
 
 	protoProducts := make([]*inventoryv1.Product, len(products))
-	for i, p := range products {
-		protoProducts[i] = productToProto(&p)
+	for i := range products {
+		protoProducts[i] = productToProto(&products[i])
 	}
 
 	return &inventoryv1.SearchProductsResponse{

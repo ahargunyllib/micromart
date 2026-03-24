@@ -20,9 +20,6 @@ type DialOptions struct {
 }
 
 func Dial(ctx context.Context, addr string) (*grpc.ClientConn, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
@@ -32,9 +29,6 @@ func Dial(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 
 // DialWithResilience creates a gRPC client with circuit breaker and retry interceptors.
 func DialWithResilience(ctx context.Context, addr string, opts DialOptions) (*grpc.ClientConn, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
 	interceptors := []grpc.UnaryClientInterceptor{}
 
 	// Retry goes first (outer) — it wraps the circuit breaker

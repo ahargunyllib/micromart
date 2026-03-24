@@ -70,7 +70,7 @@ type SagaItem struct {
 	Quantity  int32
 }
 
-func (s *SagaOrchestrator) Execute(ctx context.Context, input SagaInput) error {
+func (s *SagaOrchestrator) Execute(ctx context.Context, input *SagaInput) error {
 	start := time.Now()
 
 	// Start a trace span for the entire saga
@@ -159,7 +159,7 @@ func (s *SagaOrchestrator) Execute(ctx context.Context, input SagaInput) error {
 
 	// Publish analytics event
 	if s.clickhouse != nil {
-		s.clickhouse.Publish(OrderEvent{
+		s.clickhouse.Publish(&OrderEvent{
 			OrderID:     input.OrderID,
 			CustomerID:  input.CustomerID,
 			Status:      OrderStatusCompleted,
@@ -182,12 +182,12 @@ func (s *SagaOrchestrator) Resume(ctx context.Context) error {
 		return fmt.Errorf("query in-progress sagas: %w", err)
 	}
 
-	for _, saga := range sagas {
-		s.log.Warn("resuming interrupted saga", slog.String("saga_id", saga.ID), slog.String("order_id", saga.OrderID))
-		if saga.ReservationID.Valid {
-			s.compensateReserve(ctx, saga.ReservationID.String, saga.OrderID)
+	for i := range sagas {
+		s.log.Warn("resuming interrupted saga", slog.String("saga_id", sagas[i].ID), slog.String("order_id", sagas[i].OrderID))
+		if sagas[i].ReservationID.Valid {
+			s.compensateReserve(ctx, sagas[i].ReservationID.String, sagas[i].OrderID)
 		}
-		s.fail(ctx, saga.ID, saga.OrderID, "", "interrupted by restart", nil)
+		_ = s.fail(ctx, sagas[i].ID, sagas[i].OrderID, "", "interrupted by restart", nil)
 	}
 	return nil
 }
@@ -202,7 +202,7 @@ func (s *SagaOrchestrator) recordResult(result string, duration time.Duration) {
 
 // --- Saga Steps ---
 
-func (s *SagaOrchestrator) reserveInventory(ctx context.Context, input SagaInput) (string, error) {
+func (s *SagaOrchestrator) reserveInventory(ctx context.Context, input *SagaInput) (string, error) {
 	_, span := otel.Tracer("order-service").Start(ctx, "saga.ReserveInventory")
 	defer span.End()
 
@@ -275,19 +275,19 @@ func (s *SagaOrchestrator) createSagaState(ctx context.Context, orderID string) 
 }
 
 func (s *SagaOrchestrator) updateStep(ctx context.Context, sagaID string, step SagaStep) {
-	s.db.ExecContext(ctx, `UPDATE saga_state SET current_step = $1, updated_at = NOW() WHERE id = $2`, string(step), sagaID)
+	_, _ = s.db.ExecContext(ctx, `UPDATE saga_state SET current_step = $1, updated_at = NOW() WHERE id = $2`, string(step), sagaID)
 }
 
 func (s *SagaOrchestrator) setReservationID(ctx context.Context, sagaID, reservationID string) {
-	s.db.ExecContext(ctx, `UPDATE saga_state SET reservation_id = $1, updated_at = NOW() WHERE id = $2`, reservationID, sagaID)
+	_, _ = s.db.ExecContext(ctx, `UPDATE saga_state SET reservation_id = $1, updated_at = NOW() WHERE id = $2`, reservationID, sagaID)
 }
 
 func (s *SagaOrchestrator) updateOrderStatus(ctx context.Context, orderID, status string) {
-	s.db.ExecContext(ctx, `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`, status, orderID)
+	_, _ = s.db.ExecContext(ctx, `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`, status, orderID)
 }
 
 func (s *SagaOrchestrator) completeSaga(ctx context.Context, sagaID string) {
-	s.db.ExecContext(ctx, `UPDATE saga_state SET status = $1, updated_at = NOW() WHERE id = $2`, SagaStatusCompleted, sagaID)
+	_, _ = s.db.ExecContext(ctx, `UPDATE saga_state SET status = $1, updated_at = NOW() WHERE id = $2`, SagaStatusCompleted, sagaID)
 }
 
 func (s *SagaOrchestrator) fail(ctx context.Context, sagaID, orderID, reservationID, reason string, originalErr error) error {
@@ -295,8 +295,8 @@ func (s *SagaOrchestrator) fail(ctx context.Context, sagaID, orderID, reservatio
 	if originalErr != nil {
 		msg = fmt.Sprintf("%s: %v", reason, originalErr)
 	}
-	s.db.ExecContext(ctx, `UPDATE saga_state SET status = $1, failure_reason = $2, updated_at = NOW() WHERE id = $3`, SagaStatusFailed, msg, sagaID)
-	s.db.ExecContext(ctx, `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`, OrderStatusFailed, orderID)
+	_, _ = s.db.ExecContext(ctx, `UPDATE saga_state SET status = $1, failure_reason = $2, updated_at = NOW() WHERE id = $3`, SagaStatusFailed, msg, sagaID)
+	_, _ = s.db.ExecContext(ctx, `UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`, OrderStatusFailed, orderID)
 	s.log.Error("saga failed", slog.String("saga_id", sagaID), slog.String("order_id", orderID), slog.String("reservation_id", reservationID), slog.String("reason", msg))
 	return fmt.Errorf("saga failed: %s", msg)
 }

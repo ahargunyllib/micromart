@@ -48,7 +48,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("start postgres container: %v", err)
 	}
-	t.Cleanup(func() { pgContainer.Terminate(ctx) })
+	t.Cleanup(func() { _ = pgContainer.Terminate(ctx) })
 
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
@@ -59,7 +59,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("connect to postgres: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 
 	runMigrations(t, db, migrationsDir)
 
@@ -74,7 +74,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	grpcServer := grpc.NewServer()
 	inventoryv1.RegisterInventoryServiceServer(grpcServer, server)
 
-	go grpcServer.Serve(lis)
+	go func() { _ = grpcServer.Serve(lis) }()
 	t.Cleanup(func() { grpcServer.GracefulStop() })
 
 	conn, err := grpc.NewClient(lis.Addr().String(),
@@ -83,7 +83,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("dial grpc: %v", err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 
 	client := inventoryv1.NewInventoryServiceClient(conn)
 

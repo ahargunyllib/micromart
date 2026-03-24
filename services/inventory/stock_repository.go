@@ -17,7 +17,7 @@ func (r *Repository) ReserveStock(ctx context.Context, orderID string, items []S
 	if err != nil {
 		return "", fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	for _, item := range items {
 		// Lock the product row and check stock
@@ -71,7 +71,7 @@ func (r *Repository) ReleaseStock(ctx context.Context, reservationID string) err
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var reservations []StockReservation
 	err = tx.SelectContext(ctx, &reservations, `
@@ -115,7 +115,7 @@ func (r *Repository) DecrementStock(ctx context.Context, reservationID string) e
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var reservations []StockReservation
 	err = tx.SelectContext(ctx, &reservations, `

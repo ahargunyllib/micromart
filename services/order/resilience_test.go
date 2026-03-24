@@ -69,7 +69,7 @@ func TestRetryMechanism_NonTransientErrors(t *testing.T) {
 
 	// Execute saga - should fail immediately without retries
 	start := time.Now()
-	err = saga.Execute(ctx, SagaInput{
+	err = saga.Execute(ctx, &SagaInput{
 		OrderID: order.ID,
 		Items:   []SagaItem{{ProductID: product.Id, Quantity: 1}},
 	})
@@ -229,7 +229,7 @@ func TestSagaRecovery_WithIntermittentFailures(t *testing.T) {
 			t.Fatalf("create order %d: %v", i, err)
 		}
 
-		err = saga.Execute(ctx, SagaInput{
+		err = saga.Execute(ctx, &SagaInput{
 			OrderID: order.ID,
 			Items:   []SagaItem{{ProductID: product.Id, Quantity: 1}},
 		})
@@ -248,38 +248,6 @@ func TestSagaRecovery_WithIntermittentFailures(t *testing.T) {
 }
 
 // --- Mock Clients for Resilience Testing ---
-
-// mockInventoryClientTransientFailures fails N times with Unavailable, then succeeds
-type mockInventoryClientTransientFailures struct {
-	inventoryv1.InventoryServiceClient
-	real         inventoryv1.InventoryServiceClient
-	failCount    int32
-	attemptCount *atomic.Int32
-}
-
-func (m *mockInventoryClientTransientFailures) ReserveStock(ctx context.Context, req *inventoryv1.ReserveStockRequest, opts ...grpc.CallOption) (*inventoryv1.ReserveStockResponse, error) {
-	attempt := m.attemptCount.Add(1)
-
-	if attempt <= m.failCount {
-		// Simulate transient failure
-		return nil, status.Error(codes.Unavailable, "simulated transient failure")
-	}
-
-	// Succeed after N failures
-	return m.real.ReserveStock(ctx, req, opts...)
-}
-
-func (m *mockInventoryClientTransientFailures) GetProduct(ctx context.Context, req *inventoryv1.GetProductRequest, opts ...grpc.CallOption) (*inventoryv1.GetProductResponse, error) {
-	return m.real.GetProduct(ctx, req, opts...)
-}
-
-func (m *mockInventoryClientTransientFailures) ReleaseStock(ctx context.Context, req *inventoryv1.ReleaseStockRequest, opts ...grpc.CallOption) (*inventoryv1.ReleaseStockResponse, error) {
-	return m.real.ReleaseStock(ctx, req, opts...)
-}
-
-func (m *mockInventoryClientTransientFailures) DecrementStock(ctx context.Context, req *inventoryv1.DecrementStockRequest, opts ...grpc.CallOption) (*inventoryv1.DecrementStockResponse, error) {
-	return m.real.DecrementStock(ctx, req, opts...)
-}
 
 // mockInventoryClientNonTransient always returns NotFound (non-transient)
 type mockInventoryClientNonTransient struct {

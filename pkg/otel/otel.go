@@ -47,7 +47,7 @@ func Init(ctx context.Context, serviceName, otlpEndpoint string) (trace.Tracer, 
 	tracer := tp.Tracer(serviceName)
 
 	shutdown := func() {
-		tp.Shutdown(context.Background())
+		_ = tp.Shutdown(context.Background())
 	}
 
 	return tracer, shutdown, nil

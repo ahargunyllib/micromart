@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 
@@ -51,9 +50,9 @@ func main() {
 	db, err := sqlx.Connect("pgx", config.MustGet("DATABASE_URL"))
 	if err != nil {
 		log.Error("failed to connect to database", slog.String("error", err.Error()))
-		os.Exit(1)
+		return
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(10)
@@ -69,7 +68,7 @@ func main() {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", grpcPort))
 	if err != nil {
 		log.Error("failed to listen", slog.String("error", err.Error()))
-		os.Exit(1)
+		return
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

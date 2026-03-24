@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -19,8 +18,8 @@ import (
 	metricspkg "github.com/ahargunyllib/micromart/pkg/metrics"
 	otelpkg "github.com/ahargunyllib/micromart/pkg/otel"
 	redispkg "github.com/ahargunyllib/micromart/pkg/redis"
-	"github.com/jmoiron/sqlx"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jmoiron/sqlx"
 )
 
 func main() {
@@ -55,9 +54,9 @@ func main() {
 	db, err := sqlx.Connect("pgx", config.MustGet("DATABASE_URL"))
 	if err != nil {
 		log.Error("failed to connect to database", slog.String("error", err.Error()))
-		os.Exit(1)
+		return
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(10)
 	log.Info("connected to database")
@@ -66,9 +65,9 @@ func main() {
 	redisClient, err := redispkg.NewClient(config.MustGet("REDIS_ADDR"))
 	if err != nil {
 		log.Error("failed to connect to redis", slog.String("error", err.Error()))
-		os.Exit(1)
+		return
 	}
-	defer redisClient.Close()
+	defer func() { _ = redisClient.Close() }()
 	log.Info("connected to redis")
 
 	// ClickHouse (optional — don't fail if unavailable)
@@ -105,9 +104,9 @@ func main() {
 	})
 	if err != nil {
 		log.Error("failed to connect to inventory service", slog.String("error", err.Error()))
-		os.Exit(1)
+		return
 	}
-	defer inventoryConn.Close()
+	defer func() { _ = inventoryConn.Close() }()
 	log.Info("connected to inventory service", slog.String("addr", inventoryAddr))
 
 	inventoryClient := inventoryv1.NewInventoryServiceClient(inventoryConn)
@@ -130,7 +129,7 @@ func main() {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", grpcPort))
 	if err != nil {
 		log.Error("failed to listen", slog.String("error", err.Error()))
-		os.Exit(1)
+		return
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

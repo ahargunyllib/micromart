@@ -11,20 +11,17 @@ import (
 func writeJSON(w http.ResponseWriter, statusCode int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(v)
+	err := json.NewEncoder(w).Encode(v)
+	if err != nil {
+		http.Error(w, "failed to encode JSON", http.StatusInternalServerError)
+		return
+	}
 }
 
 func writeError(w http.ResponseWriter, statusCode int, msg string) {
 	writeJSON(w, statusCode, ErrorResponse{
 		Error: msg,
 	})
-}
-
-func decodeJSON(r *http.Request, v any) error {
-	defer r.Body.Close()
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	return decoder.Decode(v)
 }
 
 func grpcToHTTP(err error) (int, string) {

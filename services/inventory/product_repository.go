@@ -118,28 +118,34 @@ func (r *Repository) ListProducts(ctx context.Context, category string, pageSize
 
 	cursor, _ := decodeCursor(pageToken)
 
-	if category != "" && cursor != "" {
+	type queryCase struct {
+		hasCategory bool
+		hasCursor   bool
+	}
+
+	switch (queryCase{category != "", cursor != ""}) {
+	case queryCase{true, true}:
 		err = r.db.SelectContext(ctx, &products, `
 			SELECT * FROM products
 			WHERE category = $1 AND active = TRUE AND id > $2
 			ORDER BY id
 			LIMIT $3`,
 			category, cursor, pageSize+1)
-	} else if category != "" {
+	case queryCase{true, false}:
 		err = r.db.SelectContext(ctx, &products, `
 			SELECT * FROM products
 			WHERE category = $1 AND active = TRUE
 			ORDER BY id
 			LIMIT $2`,
 			category, pageSize+1)
-	} else if cursor != "" {
+	case queryCase{false, true}:
 		err = r.db.SelectContext(ctx, &products, `
 			SELECT * FROM products
 			WHERE active = TRUE AND id > $1
 			ORDER BY id
 			LIMIT $2`,
 			cursor, pageSize+1)
-	} else {
+	case queryCase{false, false}:
 		err = r.db.SelectContext(ctx, &products, `
 			SELECT * FROM products
 			WHERE active = TRUE

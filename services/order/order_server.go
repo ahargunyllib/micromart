@@ -82,7 +82,7 @@ func (s *Server) CreateOrder(ctx context.Context, req *orderv1.CreateOrderReques
 	}
 
 	// Execute saga
-	s.saga.Execute(ctx, SagaInput{
+	_ = s.saga.Execute(ctx, &SagaInput{
 		OrderID:    order.ID,
 		CustomerID: req.CustomerId,
 		TotalCents: totalCents,
@@ -107,7 +107,7 @@ func (s *Server) CreateOrder(ctx context.Context, req *orderv1.CreateOrderReques
 	// Cache result in Redis
 	if req.IdempotencyKey != "" && s.redis != nil {
 		if jsonBytes, err := protojson.Marshal(resp); err == nil {
-			s.redis.SetIdempotencyResult(ctx, req.IdempotencyKey, string(jsonBytes), 24*time.Hour)
+			_ = s.redis.SetIdempotencyResult(ctx, req.IdempotencyKey, string(jsonBytes), 24*time.Hour)
 		}
 	}
 
@@ -159,11 +159,11 @@ func (s *Server) ListOrders(ctx context.Context, req *orderv1.ListOrdersRequest)
 	}
 
 	protoOrders := make([]*orderv1.Order, len(orders))
-	for i, o := range orders {
+	for i := range orders {
 		protoOrders[i] = &orderv1.Order{
-			Id: o.ID, CustomerId: o.CustomerID, Status: statusToProto(o.Status),
-			TotalCents: o.TotalCents,
-			CreatedAt:  timestamppb.New(o.CreatedAt), UpdatedAt: timestamppb.New(o.UpdatedAt),
+			Id: orders[i].ID, CustomerId: orders[i].CustomerID, Status: statusToProto(orders[i].Status),
+			TotalCents: orders[i].TotalCents,
+			CreatedAt:  timestamppb.New(orders[i].CreatedAt), UpdatedAt: timestamppb.New(orders[i].UpdatedAt),
 		}
 	}
 

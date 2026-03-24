@@ -53,7 +53,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("start order postgres: %v", err)
 	}
-	t.Cleanup(func() { orderPG.Terminate(ctx) })
+	t.Cleanup(func() { _ = orderPG.Terminate(ctx) })
 
 	inventoryPG, err := postgres.Run(ctx,
 		"postgres:18.2-alpine",
@@ -69,7 +69,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("start inventory postgres: %v", err)
 	}
-	t.Cleanup(func() { inventoryPG.Terminate(ctx) })
+	t.Cleanup(func() { _ = inventoryPG.Terminate(ctx) })
 
 	// Start Redis container
 	redisContainer, err := redis.Run(ctx,
@@ -80,7 +80,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("start redis: %v", err)
 	}
-	t.Cleanup(func() { redisContainer.Terminate(ctx) })
+	t.Cleanup(func() { _ = redisContainer.Terminate(ctx) })
 
 	// Connect to databases
 	orderConnStr, _ := orderPG.ConnectionString(ctx, "sslmode=disable")
@@ -90,13 +90,13 @@ func setupTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("connect order db: %v", err)
 	}
-	t.Cleanup(func() { orderDB.Close() })
+	t.Cleanup(func() { _ = orderDB.Close() })
 
 	inventoryDB, err := sqlx.Connect("pgx", inventoryConnStr)
 	if err != nil {
 		t.Fatalf("connect inventory db: %v", err)
 	}
-	t.Cleanup(func() { inventoryDB.Close() })
+	t.Cleanup(func() { _ = inventoryDB.Close() })
 
 	// Connect to Redis
 	redisAddr, _ := redisContainer.Endpoint(ctx, "")
@@ -104,7 +104,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("connect redis: %v", err)
 	}
-	t.Cleanup(func() { redisClient.Close() })
+	t.Cleanup(func() { _ = redisClient.Close() })
 
 	// Run migrations
 	runMigrations(t, orderDB, orderMigrationsDir)
@@ -139,7 +139,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	inventoryLis, _ := net.Listen("tcp", "localhost:0")
 	inventoryGRPC := grpc.NewServer()
 	inventoryv1.RegisterInventoryServiceServer(inventoryGRPC, inventoryServer)
-	go inventoryGRPC.Serve(inventoryLis)
+	go func() { _ = inventoryGRPC.Serve(inventoryLis) }()
 	t.Cleanup(func() { inventoryGRPC.GracefulStop() })
 
 	// Create inventory client for the Order Service
@@ -149,7 +149,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("dial inventory: %v", err)
 	}
-	t.Cleanup(func() { inventoryConn.Close() })
+	t.Cleanup(func() { _ = inventoryConn.Close() })
 
 	inventoryClient := inventoryv1.NewInventoryServiceClient(inventoryConn)
 
@@ -165,7 +165,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	orderLis, _ := net.Listen("tcp", "localhost:0")
 	orderGRPC := grpc.NewServer()
 	orderv1.RegisterOrderServiceServer(orderGRPC, orderServer)
-	go orderGRPC.Serve(orderLis)
+	go func() { _ = orderGRPC.Serve(orderLis) }()
 	t.Cleanup(func() { orderGRPC.GracefulStop() })
 
 	// Create order client for tests
@@ -175,7 +175,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("dial order: %v", err)
 	}
-	t.Cleanup(func() { orderConn.Close() })
+	t.Cleanup(func() { _ = orderConn.Close() })
 
 	orderClient := orderv1.NewOrderServiceClient(orderConn)
 
@@ -283,7 +283,7 @@ func (s *inventoryServer) ReserveStock(ctx context.Context, req *inventoryv1.Res
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "begin tx: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Reserve each item
 	for _, item := range req.Items {
@@ -336,7 +336,7 @@ func (s *inventoryServer) ReleaseStock(ctx context.Context, req *inventoryv1.Rel
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "begin tx: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Get reservations for this order (reservation_id is order_id)
 	type resItem struct {
@@ -352,7 +352,7 @@ func (s *inventoryServer) ReleaseStock(ctx context.Context, req *inventoryv1.Rel
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "query reservations: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var item resItem
@@ -400,7 +400,7 @@ func (s *inventoryServer) DecrementStock(ctx context.Context, req *inventoryv1.D
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "begin tx: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Get reservations for this order (reservation_id is order_id)
 	type resItem struct {
@@ -416,7 +416,7 @@ func (s *inventoryServer) DecrementStock(ctx context.Context, req *inventoryv1.D
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "query reservations: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var item resItem

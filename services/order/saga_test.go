@@ -139,7 +139,7 @@ func TestSagaFailure_PaymentProcessing(t *testing.T) {
 	}
 
 	// Execute saga (should fail at payment step)
-	sagaErr := saga.Execute(ctx, SagaInput{
+	sagaErr := saga.Execute(ctx, &SagaInput{
 		OrderID: order.ID,
 		Items:   []SagaItem{{ProductID: product.Id, Quantity: 2}},
 	})
@@ -221,7 +221,7 @@ func TestSagaFailure_ConfirmOrder(t *testing.T) {
 	}
 
 	// Execute saga (should fail at confirm step)
-	sagaErr := saga.Execute(ctx, SagaInput{
+	sagaErr := saga.Execute(ctx, &SagaInput{
 		OrderID: order.ID,
 		Items:   []SagaItem{{ProductID: product.Id, Quantity: 2}},
 	})
@@ -284,7 +284,7 @@ func TestSagaIdempotency_AlreadyCompleted(t *testing.T) {
 	saga := NewSagaOrchestrator(env.orderDB, env.inventoryClient, log, nil, nil)
 
 	// Try to execute saga again with same order ID
-	err = saga.Execute(ctx, SagaInput{
+	err = saga.Execute(ctx, &SagaInput{
 		OrderID: order1Resp.Order.Id,
 		Items:   []SagaItem{{ProductID: product.Id, Quantity: 2}},
 	})

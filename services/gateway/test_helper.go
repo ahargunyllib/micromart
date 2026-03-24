@@ -52,7 +52,7 @@ func setupTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("start order pg: %v", err)
 	}
-	t.Cleanup(func() { orderPG.Terminate(ctx) })
+	t.Cleanup(func() { _ = orderPG.Terminate(ctx) })
 
 	inventoryPG, err := postgres.Run(ctx, "postgres:18.2-alpine",
 		postgres.WithDatabase("inventory_test"),
@@ -66,14 +66,14 @@ func setupTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("start inventory pg: %v", err)
 	}
-	t.Cleanup(func() { inventoryPG.Terminate(ctx) })
+	t.Cleanup(func() { _ = inventoryPG.Terminate(ctx) })
 
 	orderConnStr, _ := orderPG.ConnectionString(ctx, "sslmode=disable")
 	inventoryConnStr, _ := inventoryPG.ConnectionString(ctx, "sslmode=disable")
 
 	orderDB, _ := sqlx.Connect("pgx", orderConnStr)
 	inventoryDB, _ := sqlx.Connect("pgx", inventoryConnStr)
-	t.Cleanup(func() { orderDB.Close(); inventoryDB.Close() })
+	t.Cleanup(func() { _ = orderDB.Close(); _ = inventoryDB.Close() })
 
 	runMigrations(t, orderDB, orderMigrations)
 	runMigrations(t, inventoryDB, inventoryMigrations)
@@ -81,12 +81,12 @@ func setupTestEnv(t *testing.T) *testEnv {
 	inventoryLis, _ := net.Listen("tcp", "localhost:0")
 	inventoryGRPC := grpc.NewServer()
 	inventoryv1.RegisterInventoryServiceServer(inventoryGRPC, &fullInventoryServer{db: inventoryDB})
-	go inventoryGRPC.Serve(inventoryLis)
+	go func() { _ = inventoryGRPC.Serve(inventoryLis) }()
 	t.Cleanup(func() { inventoryGRPC.GracefulStop() })
 
 	inventoryConn, _ := grpc.NewClient(inventoryLis.Addr().String(),
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
-	t.Cleanup(func() { inventoryConn.Close() })
+	t.Cleanup(func() { _ = inventoryConn.Close() })
 	inventoryClient := inventoryv1.NewInventoryServiceClient(inventoryConn)
 
 	orderLis, _ := net.Listen("tcp", "localhost:0")
@@ -95,12 +95,12 @@ func setupTestEnv(t *testing.T) *testEnv {
 		db:              orderDB,
 		inventoryClient: inventoryClient,
 	})
-	go orderGRPC.Serve(orderLis)
+	go func() { _ = orderGRPC.Serve(orderLis) }()
 	t.Cleanup(func() { orderGRPC.GracefulStop() })
 
 	orderConn, _ := grpc.NewClient(orderLis.Addr().String(),
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
-	t.Cleanup(func() { orderConn.Close() })
+	t.Cleanup(func() { _ = orderConn.Close() })
 	orderClient := orderv1.NewOrderServiceClient(orderConn)
 
 	productHandler := NewProductHandler(inventoryClient)
@@ -263,11 +263,11 @@ func (s *fullInventoryServer) ListProducts(ctx context.Context, req *inventoryv1
 		return nil, status.Errorf(codes.Internal, "%v", err)
 	}
 	result := make([]*inventoryv1.Product, len(products))
-	for i, p := range products {
+	for i := range products {
 		result[i] = &inventoryv1.Product{
-			Id: p.ID, Name: p.Name, Description: p.Description, Category: p.Category,
-			PriceCents: p.PriceCents, StockAvailable: p.StockAvailable, StockReserved: p.StockReserved,
-			Active: p.Active, CreatedAt: timestamppb.New(p.CreatedAt), UpdatedAt: timestamppb.New(p.UpdatedAt),
+			Id: products[i].ID, Name: products[i].Name, Description: products[i].Description, Category: products[i].Category,
+			PriceCents: products[i].PriceCents, StockAvailable: products[i].StockAvailable, StockReserved: products[i].StockReserved,
+			Active: products[i].Active, CreatedAt: timestamppb.New(products[i].CreatedAt), UpdatedAt: timestamppb.New(products[i].UpdatedAt),
 		}
 	}
 	return &inventoryv1.ListProductsResponse{Products: result}, nil
@@ -294,11 +294,11 @@ func (s *fullInventoryServer) SearchProducts(ctx context.Context, req *inventory
 		return nil, status.Errorf(codes.Internal, "%v", err)
 	}
 	result := make([]*inventoryv1.Product, len(products))
-	for i, p := range products {
+	for i := range products {
 		result[i] = &inventoryv1.Product{
-			Id: p.ID, Name: p.Name, Description: p.Description, Category: p.Category,
-			PriceCents: p.PriceCents, StockAvailable: p.StockAvailable, StockReserved: p.StockReserved,
-			Active: p.Active, CreatedAt: timestamppb.New(p.CreatedAt), UpdatedAt: timestamppb.New(p.UpdatedAt),
+			Id: products[i].ID, Name: products[i].Name, Description: products[i].Description, Category: products[i].Category,
+			PriceCents: products[i].PriceCents, StockAvailable: products[i].StockAvailable, StockReserved: products[i].StockReserved,
+			Active: products[i].Active, CreatedAt: timestamppb.New(products[i].CreatedAt), UpdatedAt: timestamppb.New(products[i].UpdatedAt),
 		}
 	}
 	return &inventoryv1.SearchProductsResponse{Products: result}, nil
@@ -318,13 +318,13 @@ func (s *fullInventoryServer) UpdateProduct(ctx context.Context, req *inventoryv
 		UpdatedAt      time.Time `db:"updated_at"`
 	}
 	if req.Name != nil {
-		s.db.ExecContext(ctx, `UPDATE products SET name = $1, updated_at = NOW() WHERE id = $2`, *req.Name, req.Id)
+		_, _ = s.db.ExecContext(ctx, `UPDATE products SET name = $1, updated_at = NOW() WHERE id = $2`, *req.Name, req.Id)
 	}
 	if req.PriceCents != nil {
-		s.db.ExecContext(ctx, `UPDATE products SET price_cents = $1, updated_at = NOW() WHERE id = $2`, *req.PriceCents, req.Id)
+		_, _ = s.db.ExecContext(ctx, `UPDATE products SET price_cents = $1, updated_at = NOW() WHERE id = $2`, *req.PriceCents, req.Id)
 	}
 	if req.Active != nil {
-		s.db.ExecContext(ctx, `UPDATE products SET active = $1, updated_at = NOW() WHERE id = $2`, *req.Active, req.Id)
+		_, _ = s.db.ExecContext(ctx, `UPDATE products SET active = $1, updated_at = NOW() WHERE id = $2`, *req.Active, req.Id)
 	}
 	err := s.db.GetContext(ctx, &p, `SELECT * FROM products WHERE id = $1`, req.Id)
 	if err != nil {
@@ -383,7 +383,7 @@ func (s *fullOrderServer) CreateOrder(ctx context.Context, req *orderv1.CreateOr
 	}
 
 	tx, _ := s.db.BeginTxx(ctx, nil)
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Idempotency check
 	if req.IdempotencyKey != "" {
@@ -398,8 +398,8 @@ func (s *fullOrderServer) CreateOrder(ctx context.Context, req *orderv1.CreateOr
 				CreatedAt  time.Time `db:"created_at"`
 				UpdatedAt  time.Time `db:"updated_at"`
 			}
-			tx.GetContext(ctx, &order, `SELECT id, customer_id, status, total_cents, created_at, updated_at FROM orders WHERE id = $1`, existingID)
-			tx.Rollback()
+			_ = tx.GetContext(ctx, &order, `SELECT id, customer_id, status, total_cents, created_at, updated_at FROM orders WHERE id = $1`, existingID)
+			_ = tx.Rollback()
 			return &orderv1.CreateOrderResponse{Order: &orderv1.Order{
 				Id: order.ID, CustomerId: order.CustomerID, Status: orderv1.OrderStatus_ORDER_STATUS_PENDING,
 				TotalCents: order.TotalCents, CreatedAt: timestamppb.New(order.CreatedAt), UpdatedAt: timestamppb.New(order.UpdatedAt),
@@ -434,7 +434,7 @@ func (s *fullOrderServer) CreateOrder(ctx context.Context, req *orderv1.CreateOr
 		}
 	}
 
-	tx.Commit()
+	_ = tx.Commit()
 
 	return &orderv1.CreateOrderResponse{Order: &orderv1.Order{
 		Id: orderID, CustomerId: req.CustomerId, Status: orderv1.OrderStatus_ORDER_STATUS_PENDING,
@@ -462,7 +462,7 @@ func (s *fullOrderServer) GetOrder(ctx context.Context, req *orderv1.GetOrderReq
 		Quantity       int32  `db:"quantity"`
 		UnitPriceCents int64  `db:"unit_price_cents"`
 	}
-	s.db.SelectContext(ctx, &dbItems, `SELECT product_id, quantity, unit_price_cents FROM order_items WHERE order_id = $1`, order.ID)
+	_ = s.db.SelectContext(ctx, &dbItems, `SELECT product_id, quantity, unit_price_cents FROM order_items WHERE order_id = $1`, order.ID)
 
 	protoItems := make([]*orderv1.OrderItem, len(dbItems))
 	for i, item := range dbItems {
@@ -494,7 +494,7 @@ func (s *fullOrderServer) ListOrders(ctx context.Context, req *orderv1.ListOrder
 		CreatedAt  time.Time `db:"created_at"`
 		UpdatedAt  time.Time `db:"updated_at"`
 	}
-	s.db.SelectContext(ctx, &orders, `
+	_ = s.db.SelectContext(ctx, &orders, `
 		SELECT id, customer_id, status, total_cents, created_at, updated_at
 		FROM orders WHERE customer_id = $1 ORDER BY id LIMIT 100`, req.CustomerId)
 
@@ -522,7 +522,7 @@ func (s *fullOrderServer) CancelOrder(ctx context.Context, req *orderv1.CancelOr
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "order not found")
 	}
-	s.db.ExecContext(ctx, `UPDATE orders SET status = 'CANCELLED', updated_at = NOW() WHERE id = $1`, req.Id)
+	_, _ = s.db.ExecContext(ctx, `UPDATE orders SET status = 'CANCELLED', updated_at = NOW() WHERE id = $1`, req.Id)
 	return &orderv1.CancelOrderResponse{Order: &orderv1.Order{
 		Id: order.ID, CustomerId: order.CustomerID, Status: orderv1.OrderStatus_ORDER_STATUS_CANCELLED,
 		TotalCents: order.TotalCents,

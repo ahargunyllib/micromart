@@ -13,22 +13,22 @@ import (
 
 // OrderEvent represents a completed order event for analytics.
 type OrderEvent struct {
-	OrderID    string
-	CustomerID string
-	Status     string
-	TotalCents int64
-	ItemCount  int32
-	CreatedAt  time.Time
+	OrderID     string
+	CustomerID  string
+	Status      string
+	TotalCents  int64
+	ItemCount   int32
+	CreatedAt   time.Time
 	CompletedAt time.Time
 }
 
 // ClickHouseClient manages the ClickHouse connection and batch inserts.
 type ClickHouseClient struct {
-	conn    driver.Conn
-	log     *slog.Logger
-	events  chan OrderEvent
-	done    chan struct{}
-	wg      sync.WaitGroup
+	conn   driver.Conn
+	log    *slog.Logger
+	events chan *OrderEvent
+	done   chan struct{}
+	wg     sync.WaitGroup
 }
 
 // NewClickHouseClient creates a ClickHouse connection and starts the consumer.
@@ -56,7 +56,7 @@ func NewClickHouseClient(addr, database, username, password string, log *slog.Lo
 	c := &ClickHouseClient{
 		conn:   conn,
 		log:    log,
-		events: make(chan OrderEvent, 1000),
+		events: make(chan *OrderEvent, 1000),
 		done:   make(chan struct{}),
 	}
 
@@ -109,7 +109,7 @@ func (c *ClickHouseClient) CreateTables(ctx context.Context) error {
 }
 
 // Publish sends an order event to the consumer channel.
-func (c *ClickHouseClient) Publish(event OrderEvent) {
+func (c *ClickHouseClient) Publish(event *OrderEvent) {
 	select {
 	case c.events <- event:
 	default:
@@ -125,7 +125,7 @@ func (c *ClickHouseClient) StartConsumer(batchSize int, flushInterval time.Durat
 	go func() {
 		defer c.wg.Done()
 
-		batch := make([]OrderEvent, 0, batchSize)
+		batch := make([]*OrderEvent, 0, batchSize)
 		ticker := time.NewTicker(flushInterval)
 		defer ticker.Stop()
 
@@ -162,7 +162,7 @@ func (c *ClickHouseClient) StartConsumer(batchSize int, flushInterval time.Durat
 	}()
 }
 
-func (c *ClickHouseClient) flush(events []OrderEvent) {
+func (c *ClickHouseClient) flush(events []*OrderEvent) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -173,10 +173,10 @@ func (c *ClickHouseClient) flush(events []OrderEvent) {
 		return
 	}
 
-	for _, e := range events {
-		err := batch.Append(e.OrderID, e.CustomerID, e.Status, e.TotalCents, e.ItemCount, e.CreatedAt, e.CompletedAt)
+	for i := range events {
+		err := batch.Append(events[i].OrderID, events[i].CustomerID, events[i].Status, events[i].TotalCents, events[i].ItemCount, events[i].CreatedAt, events[i].CompletedAt)
 		if err != nil {
-			c.log.Error("append to batch", slog.String("error", err.Error()), slog.String("order_id", e.OrderID))
+			c.log.Error("append to batch", slog.String("error", err.Error()), slog.String("order_id", events[i].OrderID))
 		}
 	}
 
@@ -191,7 +191,7 @@ func (c *ClickHouseClient) flush(events []OrderEvent) {
 func (c *ClickHouseClient) Close() {
 	close(c.done)
 	c.wg.Wait()
-	c.conn.Close()
+	_ = c.conn.Close()
 }
 
 type DailyRevenue struct {
