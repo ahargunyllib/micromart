@@ -1,6 +1,12 @@
 # micromart
 
-Go microservices order platform — gRPC, saga pattern, PostgreSQL/Redis/ClickHouse, K8s
+## Overview
+
+A production-grade e-commerce order processing backend built as Go microservices. The system demonstrates distributed systems patterns in a real-world domain: an API Gateway receives REST requests from clients and translates them to gRPC calls across an Order Service and Inventory Service. When a customer places an order, the Order Service orchestrates a saga that reserves inventory, processes payment, and confirms the order, with automatic compensation (rollback) if any step fails.
+
+Each service owns its own PostgreSQL database with strict isolation. Redis handles idempotency keys, distributed locking, and rate limiting. Completed orders are streamed asynchronously to ClickHouse for analytics. The entire system is observable via OpenTelemetry traces, Prometheus metrics, and Grafana dashboards.
+
+Built as a learning project to explore microservices architecture, distributed transactions, and infrastructure patterns end-to-end.
 
 ## Architecture
 
