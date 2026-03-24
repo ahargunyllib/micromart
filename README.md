@@ -127,6 +127,13 @@ sequenceDiagram
     O-->>O: Return order with FAILED status
 ```
 
+## Documentation
+
+- **[Development Guide](DEVELOPMENT.md)** - Setup, coding, testing, debugging
+- **[Contributing Guide](CONTRIBUTING.md)** - How to contribute, PR guidelines
+- **[Kubernetes Deployment](deploy/k8s/README.md)** - K8s setup and operations
+- **[Architecture Decision Records](docs/adr/)** - Design decisions and rationale
+
 ## Tech Stack
 
 | Component | Technology |
@@ -197,6 +204,50 @@ make run-inventory    # gRPC :50052, metrics :9092
 make run-order        # gRPC :50051, metrics :9091
 make run-gateway      # HTTP :8080
 ```
+
+### Deploy to Kubernetes
+
+For production deployments, use Kubernetes manifests in `deploy/k8s/`:
+
+```bash
+# Build service images
+make build
+
+# Build migration images
+make build-migrations
+
+# Deploy everything (namespace, infrastructure, services)
+make k8s-apply
+
+# Run database migrations
+make k8s-migrate-up
+
+# Check migration status
+make k8s-migrate-status
+
+# View migration logs if needed
+make k8s-migrate-logs-order
+make k8s-migrate-logs-inventory
+
+# Port-forward to access services locally
+make k8s-port-forward-gateway      # Access API at localhost:8080
+make k8s-port-forward-grafana      # Access Grafana at localhost:3000
+make k8s-port-forward-jaeger       # Access Jaeger at localhost:16686
+make k8s-port-forward-prometheus   # Access Prometheus at localhost:9090
+
+# View logs
+make k8s-logs-gateway
+make k8s-logs-order
+make k8s-logs-inventory
+
+# Check status of all resources
+make k8s-status
+
+# Clean up
+make k8s-delete
+```
+
+See [deploy/k8s/README.md](deploy/k8s/README.md) for detailed Kubernetes deployment documentation.
 
 ### Verify
 
@@ -306,7 +357,10 @@ micromart/
 ├── go.work
 ├── Makefile
 ├── .golangci.yaml
-└── .gitignore
+├── .gitignore
+├── README.md                       # This file
+├── DEVELOPMENT.md                  # Development guide
+└── CONTRIBUTING.md                 # Contribution guidelines
 ```
 
 ## API Reference
@@ -338,6 +392,23 @@ See the [Architecture Decision Records](docs/adr/) for detailed rationale:
 - [ADR-002: gRPC for Inter-Service Communication](docs/adr/adr-002-grpc.md)
 - [ADR-003: ClickHouse for Analytics](docs/adr/adr-003-clickhouse.md)
 - [ADR-004: Monorepo with Go Workspaces](docs/adr/adr-004-monorepo.md)
+
+## Development
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for detailed development instructions including:
+- Setting up your environment
+- Working with proto files and migrations
+- Code quality and testing
+- Debugging and profiling
+- Adding new services
+
+## Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
+- Contribution workflow
+- Code style guidelines
+- Testing requirements
+- PR guidelines
 
 ## License
 
